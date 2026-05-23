@@ -1,21 +1,15 @@
+# pyrefly: ignore [missing-import]
 from pydantic import BaseModel, Field
 
 
-class UserInput(BaseModel):
-    username: str
-    stack: list[str] = Field(description="e.g. ['TypeScript', 'React', 'LangChain']")
-    interests: list[str] = Field(description="e.g. ['frontend', 'ai/ml']")
+class RepoOnboardRequest(BaseModel):
+    repo_url: str = Field(description="e.g. https://github.com/Significant-Gravitas/AutoGPT")
 
 
-class MatchedIssue(BaseModel):
+class RepoDetails(BaseModel):
     repo: str
-    issue_number: int
-    title: str
-    url: str
-    labels: list[str]
-    match_reason: str
-
-
-class IssueSearchResult(BaseModel):
-    issues: list[MatchedIssue]
-    searched_repos: list[str]
+    readme: str
+    contributing: str
+    repo_stars: int
+    repo_language: str
+    license: str

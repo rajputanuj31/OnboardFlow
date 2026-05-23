@@ -53,6 +53,10 @@ htmlcov/
 
 # SQLite
 *.sqlite3
+*.db
+
+# Cache folders
+.cache/
 
 # Temporary files
 tmp/
