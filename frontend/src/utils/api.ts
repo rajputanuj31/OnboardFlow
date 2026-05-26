@@ -52,10 +52,15 @@ class ApiError extends Error {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
-  const defaultHeaders = {
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem('model_api_key') || '' : '';
+  
+  const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   };
+  if (localKey) {
+    defaultHeaders['x-model-api-key'] = localKey;
+  }
 
   const response = await fetch(url, {
     ...options,

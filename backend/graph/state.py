@@ -3,6 +3,7 @@ from typing import TypedDict
 class RepoState(TypedDict):
     session_id: str
     repo_url: str
+    model_api_key: str
 
     # ── Fetched from GitHub (filled by ingest node) ──────────────────────────
     repo_name: str

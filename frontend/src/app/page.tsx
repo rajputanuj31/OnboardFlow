@@ -14,6 +14,7 @@ export default function Home() {
   const [showIngest, setShowIngest] = useState(true);
   const [restoring, setRestoring] = useState(false);
   const [isClient, setIsClient] = useState(false);
+  const [apiKey, setApiKey] = useState('');
   
   // Responsive states
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -40,7 +41,18 @@ export default function Home() {
         console.error('Failed to parse saved sessions', e);
       }
     }
+
+    // Load API Key
+    const savedKey = localStorage.getItem('model_api_key') || '';
+    setApiKey(savedKey);
   }, []);
+
+  const handleApiKeyChange = (val: string) => {
+    setApiKey(val);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('model_api_key', val);
+    }
+  };
 
   // Save sessions to localStorage
   const saveSessions = (updated: Session[]) => {
@@ -193,6 +205,8 @@ export default function Home() {
           onNewSessionClick={handleNewSessionClick}
           onDeleteSession={handleDeleteSession}
           onCloseClick={() => setIsSidebarOpen(false)}
+          apiKey={apiKey}
+          onApiKeyChange={handleApiKeyChange}
         />
       </div>
 
@@ -266,6 +280,7 @@ export default function Home() {
             <IngestPanel
               onIngestSuccess={handleIngestSuccess}
               existingSessionIds={sessions.map((s) => s.id)}
+              apiKey={apiKey}
             />
           ) : (
             <div className="flex-1 flex h-full overflow-hidden min-h-0">

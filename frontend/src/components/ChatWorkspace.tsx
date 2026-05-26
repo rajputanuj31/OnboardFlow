@@ -99,11 +99,17 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
     setStatusText('');
 
     try {
+      const localKey = typeof window !== 'undefined' ? localStorage.getItem('model_api_key') || '' : '';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (localKey) {
+        headers['x-model-api-key'] = localKey;
+      }
+
       const response = await fetch(`${API_BASE_URL}/ask`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           session_id: sessionId,
           question: textToSend.trim(),

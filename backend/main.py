@@ -1,6 +1,6 @@
 import asyncio
 import json
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -13,6 +13,7 @@ from models import (
     SessionResponse,
 )
 from utils.session_db import init_db, save_session, get_session, get_sessions_count
+from config import settings
 
 load_dotenv()
 
@@ -38,14 +39,22 @@ app.add_middleware(
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.post("/ingest", response_model=IngestResponse)
-async def ingest_endpoint(req: IngestRequest):
+async def ingest_endpoint(req: IngestRequest, x_model_api_key: str | None = Header(None)):
     """
     Fetch a GitHub repo, run LLM summarization, and store the result in session.
     Call this once per repo. Re-calling with the same session_id overwrites it.
     """
+    api_key = x_model_api_key or settings.openai_api_key
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Model API Key is required. Please enter it in the Ingest screen."
+        )
+
     initial_state: RepoState = {
         "session_id": req.session_id,
         "repo_url": req.repo_url,
+        "model_api_key": api_key,
         # Fetch fields (filled by ingest node)
         "repo_name": "",
         "repo_description": "",
@@ -91,7 +100,7 @@ async def ingest_endpoint(req: IngestRequest):
 
 
 @app.post("/ask")
-async def ask_endpoint(req: QuestionRequest):
+async def ask_endpoint(req: QuestionRequest, x_model_api_key: str | None = Header(None)):
     """
     Answer a question about the ingested repository and stream response SSE.
     """
@@ -101,7 +110,16 @@ async def ask_endpoint(req: QuestionRequest):
             status_code=404,
             detail="Session not found. Call /ingest first.",
         )
+    
+    api_key = x_model_api_key or state.get("model_api_key") or settings.openai_api_key
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Model API Key is required. Please configure it."
+        )
+    
     state["current_question"] = req.question
+    state["model_api_key"] = api_key
 
     async def event_generator():
         final_answer_chunks = []

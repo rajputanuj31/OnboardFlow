@@ -64,13 +64,14 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[st
         chunks.append("".join(current_chunk))
     return chunks
 
-def _embeddings_model():
+def _embeddings_model(api_key: str = ""):
+    key = api_key or settings.openai_api_key
     return OpenAIEmbeddings(
         model="text-embedding-3-small", 
-        api_key=settings.openai_api_key
+        api_key=key
     )
 
-async def save_repo_chunks(session_id: str, files: dict[str, str], readme: str = "", contributing: str = ""):
+async def save_repo_chunks(session_id: str, files: dict[str, str], readme: str = "", contributing: str = "", model_api_key: str = ""):
     """Chunk and embed all fetched repository files, saving to SQLite with content-hash caching."""
     init_vector_db()
 
@@ -141,7 +142,7 @@ async def save_repo_chunks(session_id: str, files: dict[str, str], readme: str =
         return
 
     # Compute embeddings in batch
-    emb_model = _embeddings_model()
+    emb_model = _embeddings_model(model_api_key)
     embeddings = await emb_model.aembed_documents(texts_to_embed)
 
     # Insert new chunks into DB
@@ -164,13 +165,13 @@ def cosine_similarity(v1: list[float], v2: list[float]) -> float:
         return 0.0
     return dot_product / (norm1 * norm2)
 
-async def query_vector_db(session_id: str, query: str, top_k: int = 4) -> list[dict]:
+async def query_vector_db(session_id: str, query: str, top_k: int = 4, model_api_key: str = "") -> list[dict]:
     """Retrieve top K most similar chunks for the session."""
     if not query or not query.strip():
         return []
 
     # Get query embedding
-    emb_model = _embeddings_model()
+    emb_model = _embeddings_model(model_api_key)
     query_embedding = await emb_model.aembed_query(query)
 
     # Retrieve all chunks for session

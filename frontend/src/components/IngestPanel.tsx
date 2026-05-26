@@ -8,6 +8,7 @@ import { GitBranch, Play, AlertCircle, RefreshCw } from 'lucide-react';
 interface IngestPanelProps {
   onIngestSuccess: (session: Session) => void;
   existingSessionIds: string[];
+  apiKey: string;
 }
 
 const STEPS = [
@@ -18,7 +19,7 @@ const STEPS = [
   'Generating repository summary & architecture notes in parallel...',
 ];
 
-export default function IngestPanel({ onIngestSuccess, existingSessionIds }: IngestPanelProps) {
+export default function IngestPanel({ onIngestSuccess, existingSessionIds, apiKey }: IngestPanelProps) {
   const [repoUrl, setRepoUrl] = useState('');
   const [sessionId, setSessionId] = useState('');
   const [loading, setLoading] = useState(false);
@@ -201,6 +202,16 @@ export default function IngestPanel({ onIngestSuccess, existingSessionIds }: Ing
           </div>
         </div>
 
+        {!apiKey && (
+          <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 shadow-lg shadow-amber-500/5">
+            <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="text-xs text-amber-300 leading-relaxed">
+              <span className="font-semibold block mb-0.5 text-amber-200">Model API Key Required</span>
+              Please configure your OpenAI API Key in the sidebar settings. Your key is stored locally in your browser's <code className="bg-amber-500/15 px-1 py-0.5 rounded text-[10px] font-mono text-amber-200">localStorage</code> and never shared.
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
@@ -221,6 +232,7 @@ export default function IngestPanel({ onIngestSuccess, existingSessionIds }: Ing
               className="w-full bg-zinc-950 border border-white/5 focus:border-brand-indigo focus:ring-1 focus:ring-brand-indigo outline-none text-sm px-4 py-3 rounded-xl text-zinc-200 placeholder-zinc-700 transition-all duration-300"
             />
           </div>
+
 
           {/* Session ID */}
           <div className="space-y-2">

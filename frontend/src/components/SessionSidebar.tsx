@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { FolderGit, Plus, MessageSquare, Trash2, ShieldCheck, X } from 'lucide-react';
+import { FolderGit, Plus, MessageSquare, Trash2, ShieldCheck, X, Key, Eye, EyeOff } from 'lucide-react';
 
 export interface Session {
   id: string;
@@ -23,6 +23,8 @@ interface SessionSidebarProps {
   onNewSessionClick: () => void;
   onDeleteSession: (id: string) => void;
   onCloseClick?: () => void;
+  apiKey: string;
+  onApiKeyChange: (key: string) => void;
 }
 
 export default function SessionSidebar({
@@ -32,7 +34,10 @@ export default function SessionSidebar({
   onNewSessionClick,
   onDeleteSession,
   onCloseClick,
+  apiKey,
+  onApiKeyChange,
 }: SessionSidebarProps) {
+  const [showKey, setShowKey] = React.useState(false);
   return (
     <aside className="w-full h-full flex flex-col bg-zinc-950/80 border-r border-white/5 backdrop-blur-xl">
       {/* Brand Header */}
@@ -122,9 +127,31 @@ export default function SessionSidebar({
         )}
       </div>
 
-      {/* Footer Info */}
-      <div className="p-4 border-t border-white/5 bg-zinc-950/40 text-[10px] text-zinc-600 font-mono text-center">
-        Powered by OpenAI gpt-4o-mini
+      {/* API Key Settings in Footer */}
+      <div className="p-4 border-t border-white/5 bg-zinc-950/40 flex flex-col gap-2">
+        <div className="flex items-center gap-1.5 text-[9px] font-semibold text-zinc-500 uppercase tracking-wider font-mono">
+          <Key className="w-3.5 h-3.5 text-brand-indigo" />
+          <span>Model API Key</span>
+        </div>
+        <div className="relative flex items-center">
+          <input
+            type={showKey ? "text" : "password"}
+            placeholder="sk-proj-..."
+            value={apiKey}
+            onChange={(e) => onApiKeyChange(e.target.value)}
+            className="w-full bg-zinc-900 border border-white/5 focus:border-brand-indigo outline-none text-[10px] pl-3 pr-8 py-2 rounded-lg text-zinc-300 placeholder-zinc-700 font-mono transition-all duration-300"
+          />
+          <button
+            type="button"
+            onClick={() => setShowKey(!showKey)}
+            className="absolute right-2 text-zinc-500 hover:text-zinc-300 transition-colors p-1"
+          >
+            {showKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+          </button>
+        </div>
+        <div className="text-[8px] text-zinc-600 font-mono text-center mt-1">
+          Powered by OpenAI gpt-4o-mini
+        </div>
       </div>
     </aside>
   );

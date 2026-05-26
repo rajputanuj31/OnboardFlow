@@ -15,10 +15,12 @@ from onboard_github import fetch_repo_details, parse_github_repo_url, fetch_spec
 from prompts import SUMMARIZE_REPO_PROMPT, ARCHITECTURE_PROMPT, ANSWER_QUESTION_PROMPT
 
 
-@lru_cache(maxsize=1)
-def _llm() -> ChatOpenAI:
+@lru_cache(maxsize=16)
+def _llm(api_key: str = "") -> ChatOpenAI:
     """Lazy-initialize the LLM so load_dotenv() in main.py runs first."""
-    return ChatOpenAI(model="gpt-4o-mini", max_tokens=1024, temperature=0.0, streaming=True)
+    from config import settings
+    key = api_key or settings.openai_api_key
+    return ChatOpenAI(model="gpt-4o-mini", max_tokens=1024, temperature=0.0, streaming=True, api_key=key)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -54,7 +56,8 @@ async def ingest_repo(state: RepoState) -> dict:
         session_id=state["session_id"],
         files=details.files,
         readme=details.readme,
-        contributing=details.contributing
+        contributing=details.contributing,
+        model_api_key=state.get("model_api_key", "")
     )
     print(f"[INGEST] Embeddings stored successfully.")
 
@@ -107,9 +110,10 @@ async def summarize_repo(state: RepoState) -> dict:
     )
 
     # Run both LLM calls in parallel
+    api_key = state.get("model_api_key", "")
     summary_response, arch_response = await asyncio.gather(
-        _llm().ainvoke(summary_prompt),
-        _llm().ainvoke(arch_prompt),
+        _llm(api_key).ainvoke(summary_prompt),
+        _llm(api_key).ainvoke(arch_prompt),
     )
 
     print("[SUMMARIZE] Done")
@@ -139,7 +143,12 @@ async def answer_question(state: RepoState) -> dict:
     # 2. Retrieve relevant chunks from SQLite Vector DB
     from utils.vector_db import query_vector_db
     print(f"[ANSWER] Querying SQLite Vector DB for RAG chunks...")
-    chunks = await query_vector_db(state["session_id"], state["current_question"], top_k=4)
+    chunks = await query_vector_db(
+        state["session_id"], 
+        state["current_question"], 
+        top_k=4,
+        model_api_key=state.get("model_api_key", "")
+    )
     rag_snippets = []
     for chunk in chunks:
         rag_snippets.append(f"=== {chunk['filepath']} (Chunk similarity: {chunk['similarity']:.4f}) ===\n{chunk['content']}")
@@ -226,7 +235,7 @@ Here are relevant snippets from the codebase that might contain the answer or po
         return f"Error: Could not read file '{filepath}'. Make sure the path is correct and exists."
 
     # 5. Bind tool to ChatOpenAI
-    llm_with_tools = _llm().bind_tools([read_codebase_file])
+    llm_with_tools = _llm(state.get("model_api_key", "")).bind_tools([read_codebase_file])
 
     # 6. ReAct Loop (Up to 3 iterations)
     max_iterations = 3
