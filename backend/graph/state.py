@@ -25,3 +25,9 @@ class RepoState(TypedDict):
     chat_history: list[dict]
     current_question: str
     current_answer: str
+
+    # ── ReAct loop state (managed by answer node) ─────────────────────────────
+    needs_tool_call: bool
+    tool_calls_made: int
+    messages: list
+    rag_context: str

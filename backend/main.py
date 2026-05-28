@@ -27,7 +27,12 @@ def on_startup():
     init_db()
 
 frontend_url = os.getenv("FRONTEND_URL")
-allowed_origins = ["http://localhost:3000"]
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
 if frontend_url:
     # Support multiple origins if needed by splitting on comma, or just append
     if "," in frontend_url:
@@ -83,6 +88,11 @@ async def ingest_endpoint(req: IngestRequest, x_model_api_key: str | None = Head
         "chat_history": [],
         "current_question": "",
         "current_answer": "",
+        # ReAct loop state
+        "needs_tool_call": False,
+        "tool_calls_made": 0,
+        "messages": [],
+        "rag_context": "",
     }
 
     try:
@@ -132,6 +142,12 @@ async def ask_endpoint(req: QuestionRequest, x_model_api_key: str | None = Heade
     state["model_api_key"] = api_key
     if req.chat_history is not None:
         state["chat_history"] = req.chat_history
+        
+    # Reset loop/turn state for the new question
+    state["needs_tool_call"] = False
+    state["tool_calls_made"] = 0
+    state["messages"] = []
+    state["rag_context"] = ""
 
     async def event_generator():
         final_answer_chunks = []
