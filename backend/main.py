@@ -1,6 +1,8 @@
 import asyncio
 import json
+import logging
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +10,7 @@ from dotenv import load_dotenv
 
 from graph.graph import ingest_graph, qa_graph
 from graph.state import RepoState
+from mcp_clients import MCPRegistry
 from models import (
     IngestRequest, IngestResponse,
     QuestionRequest, QuestionResponse,
@@ -17,14 +20,21 @@ from utils.session_db import init_db, save_session, get_session, get_sessions_co
 from config import settings
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO)
 
 
-app = FastAPI(title="OnboardFlow", version="2.0.0")
-
-
-@app.on_event("startup")
-def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     init_db()
+    app.state.mcp = MCPRegistry()
+    await app.state.mcp.start()
+    try:
+        yield
+    finally:
+        await app.state.mcp.stop()
+
+
+app = FastAPI(title="OnboardFlow", version="2.0.0", lifespan=lifespan)
 
 frontend_url = os.getenv("FRONTEND_URL")
 allowed_origins = [
@@ -205,7 +215,15 @@ async def session_endpoint(session_id: str):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "sessions": get_sessions_count()}
+    mcp_status: dict = {}
+    mcp = getattr(app.state, "mcp", None)
+    if mcp is not None:
+        mcp_status = mcp.status()
+    return {
+        "status": "ok",
+        "sessions": get_sessions_count(),
+        "mcp": mcp_status,
+    }
 
 
 # ── Dev entrypoint (triggered reload V2) ───────────────────────────────────────

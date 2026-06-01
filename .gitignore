@@ -57,6 +57,7 @@ htmlcov/
 
 # Cache folders
 .cache/
+.qdrant_storage/
 
 # Temporary files
 tmp/

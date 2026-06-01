@@ -1,5 +1,4 @@
 import sys
-import sqlite3
 from pathlib import Path
 from functools import lru_cache
 from langchain_openai import ChatOpenAI
@@ -9,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from graph.state import RepoState
 from onboard_github import fetch_specific_file
-from utils.vector_db import DB_PATH
+from utils.vector_db import read_file_chunks
 
 @lru_cache(maxsize=16)
 def _llm(api_key: str = "") -> ChatOpenAI:
@@ -33,21 +32,16 @@ def _build_file_contents(files: dict[str, str], char_limit: int = 12_000) -> str
 
 
 async def _read_codebase_file(filepath: str, state: RepoState) -> str:
-    """Helper to read files from fetched files, local cache, or GitHub API."""
+    """Helper to read files from fetched files, vector DB chunks, or GitHub API."""
     # 1. Check fetched_files in state
     if filepath in state.get("fetched_files", {}):
         return state["fetched_files"][filepath]
 
-    # 2. Check local SQLite vector DB cache
+    # 2. Check Qdrant chunks for this session
     try:
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.execute(
-                "SELECT content FROM code_chunks WHERE session_id = ? AND filepath = ? ORDER BY chunk_index",
-                (state["session_id"], filepath)
-            )
-            rows = cursor.fetchall()
-            if rows:
-                return "".join(row[0] for row in rows)
+        joined = read_file_chunks(state["session_id"], filepath)
+        if joined:
+            return joined
     except Exception:
         pass
 
@@ -55,5 +49,5 @@ async def _read_codebase_file(filepath: str, state: RepoState) -> str:
     content = await fetch_specific_file(state["repo_name"], filepath)
     if content:
         return content
-        
+
     return f"Error: Could not read file '{filepath}'. Make sure the path is correct and exists."
