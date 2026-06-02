@@ -8,14 +8,16 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from graph.graph import ingest_graph, qa_graph
-from graph.state import RepoState
-from mcp_clients import MCPRegistry
+from graph.graph import ingest_graph, pr_review_graph, qa_graph
+from graph.state import PRReviewState, QAState, RepoState
+from mcp_clients import MCPRegistry, is_github_mcp_available
 from models import (
     IngestRequest, IngestResponse,
+    PRReviewRequest,
     QuestionRequest, QuestionResponse,
     SessionResponse,
 )
+from onboard_github import parse_github_pr_url
 from utils.session_db import init_db, save_session, get_session, get_sessions_count
 from config import settings
 
@@ -131,69 +133,165 @@ async def ingest_endpoint(req: IngestRequest, x_model_api_key: str | None = Head
 
 @app.post("/ask")
 async def ask_endpoint(req: QuestionRequest, x_model_api_key: str | None = Header(None)):
-    """
-    Answer a question about the ingested repository and stream response SSE.
-    """
-    state = get_session(req.session_id)
-    if not state:
-        raise HTTPException(
-            status_code=404,
-            detail="Session not found. Call /ingest first.",
-        )
-    
-    api_key = x_model_api_key or state.get("model_api_key") or settings.openai_api_key
+    """Answer a question about the ingested repository (multi-agent) and stream SSE."""
+    persisted = get_session(req.session_id)
+    if not persisted:
+        raise HTTPException(status_code=404, detail="Session not found. Call /ingest first.")
+
+    api_key = x_model_api_key or persisted.get("model_api_key") or settings.openai_api_key
     if not api_key:
+        raise HTTPException(status_code=400, detail="Model API Key is required. Please configure it.")
+
+    chat_history = req.chat_history if req.chat_history is not None else persisted.get("chat_history", [])
+
+    qa_state: QAState = {
+        "session_id": req.session_id,
+        "model_api_key": api_key,
+        "repo_name": persisted.get("repo_name", ""),
+        "repo_summary": persisted.get("repo_summary", ""),
+        "architecture_notes": persisted.get("architecture_notes", ""),
+        "repo_structure": persisted.get("repo_structure", []) or [],
+        "chat_history": chat_history,
+        "current_question": req.question,
+        "current_answer": "",
+        "selected_specialists": [],
+        "specialist_outputs": {},
+    }
+
+    return StreamingResponse(
+        _stream_multi_agent(
+            graph=qa_graph,
+            initial_state=qa_state,
+            persisted_state=persisted,
+            persist_key="chat_history",
+            user_text=req.question,
+            done_payload_builder=lambda chunks: {
+                "chat_history": list(chat_history) + [
+                    {"role": "user", "content": req.question},
+                    {"role": "assistant", "content": "".join(chunks)},
+                ]
+            },
+            persist_done_history=True,
+            session_id=req.session_id,
+        ),
+        media_type="text/event-stream",
+    )
+
+
+@app.post("/review-pr")
+async def review_pr_endpoint(req: PRReviewRequest, x_model_api_key: str | None = Header(None)):
+    """Multi-agent PR review. Streams SSE: per-agent status pills + synthesizer tokens."""
+    if not is_github_mcp_available():
         raise HTTPException(
-            status_code=400,
-            detail="Model API Key is required. Please configure it."
+            status_code=503,
+            detail=(
+                "GitHub MCP server is not available. Install github-mcp-server "
+                "(go install github.com/github/github-mcp-server@latest) and restart the backend."
+            ),
         )
-    
-    state["current_question"] = req.question
-    state["model_api_key"] = api_key
-    if req.chat_history is not None:
-        state["chat_history"] = req.chat_history
-        
-    # Reset loop/turn state for the new question
-    state["needs_tool_call"] = False
-    state["tool_calls_made"] = 0
-    state["messages"] = []
-    state["rag_context"] = ""
 
-    async def event_generator():
-        final_answer_chunks = []
-        try:
-            async for event in qa_graph.astream_events(state, version="v2"):
-                kind = event.get("event")
-                name = event.get("name")
-                
-                # 1. Output LLM Tokens
-                if kind == "on_chat_model_stream":
-                    chunk = event["data"].get("chunk")
-                    if chunk and chunk.content:
-                        final_answer_chunks.append(chunk.content)
-                        yield f"data: {json.dumps({'event': 'token', 'text': chunk.content})}\n\n"
-                
-                # 2. Output Tool Executions
-                elif kind == "on_tool_start" and name == "read_codebase_file":
-                    filepath = event["data"].get("input", {}).get("filepath", "")
-                    yield f"data: {json.dumps({'event': 'status', 'text': f'Reading file: {filepath}'})}\n\n"
-                    
-                elif kind == "on_tool_end" and name == "read_codebase_file":
-                    yield f"data: {json.dumps({'event': 'status', 'text': ''})}\n\n"
-                    
-        except Exception as e:
-            yield f"data: {json.dumps({'event': 'error', 'text': str(e)})}\n\n"
-            return
+    try:
+        owner, repo, pr_number = parse_github_pr_url(req.pr_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-        final_answer = "".join(final_answer_chunks)
-        updated_history = list(state.get("chat_history", [])) + [
-            {"role": "user", "content": req.question},
-            {"role": "assistant", "content": final_answer},
-        ]
-        
-        yield f"data: {json.dumps({'event': 'done', 'chat_history': updated_history})}\n\n"
+    api_key = x_model_api_key or settings.openai_api_key
+    if req.session_id:
+        s = get_session(req.session_id)
+        if s and not api_key:
+            api_key = s.get("model_api_key", "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Model API Key is required.")
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    pr_state: PRReviewState = {
+        "session_id": req.session_id,
+        "model_api_key": api_key,
+        "pr_url": req.pr_url,
+        "pr_owner": owner,
+        "pr_repo": repo,
+        "pr_number": pr_number,
+        "pr_metadata": {},
+        "pr_files": [],
+        "pr_diff": "",
+        "specialist_outputs": {},
+        "final_review": "",
+    }
+
+    return StreamingResponse(
+        _stream_multi_agent(
+            graph=pr_review_graph,
+            initial_state=pr_state,
+            persisted_state=None,
+            persist_key=None,
+            user_text=req.pr_url,
+            done_payload_builder=lambda chunks: {"review": "".join(chunks)},
+            persist_done_history=False,
+            session_id=None,
+        ),
+        media_type="text/event-stream",
+    )
+
+
+def _agent_from_tags(tags: list[str] | None) -> str | None:
+    for t in tags or []:
+        if isinstance(t, str) and t.startswith("agent:"):
+            return t.split(":", 1)[1]
+    return None
+
+
+async def _stream_multi_agent(
+    *,
+    graph,
+    initial_state: dict,
+    persisted_state: dict | None,
+    persist_key: str | None,
+    user_text: str,
+    done_payload_builder,
+    persist_done_history: bool,
+    session_id: str | None,
+):
+    final_chunks: list[str] = []
+    try:
+        async for event in graph.astream_events(initial_state, version="v2"):
+            kind = event.get("event")
+            name = event.get("name")
+            tags = event.get("tags") or []
+            agent = _agent_from_tags(tags)
+
+            # 1. Stream tokens ONLY from the synthesizer (tagged "final").
+            if kind == "on_chat_model_stream" and "final" in tags:
+                chunk = event["data"].get("chunk")
+                if chunk and chunk.content:
+                    final_chunks.append(chunk.content)
+                    yield f"data: {json.dumps({'event': 'token', 'text': chunk.content})}\n\n"
+                continue
+
+            # 2. Per-agent activity → status pills.
+            if agent and agent not in ("synthesizer", "router") and kind == "on_chain_start":
+                yield f"data: {json.dumps({'event': 'status', 'agent': agent, 'text': f'{agent}: thinking...'})}\n\n"
+            elif agent and agent not in ("synthesizer", "router") and kind == "on_chain_end":
+                yield f"data: {json.dumps({'event': 'status', 'agent': agent, 'text': ''})}\n\n"
+            elif kind == "on_tool_start" and agent:
+                tool_input = event["data"].get("input", {})
+                hint = ""
+                if isinstance(tool_input, dict):
+                    hint = tool_input.get("filepath") or tool_input.get("query") or ""
+                label = f"{agent}: {name}({hint})" if hint else f"{agent}: {name}"
+                yield f"data: {json.dumps({'event': 'status', 'agent': agent, 'text': label})}\n\n"
+            elif kind == "on_tool_end" and agent:
+                yield f"data: {json.dumps({'event': 'status', 'agent': agent, 'text': ''})}\n\n"
+
+    except Exception as e:
+        yield f"data: {json.dumps({'event': 'error', 'text': str(e)})}\n\n"
+        return
+
+    payload = {"event": "done", **done_payload_builder(final_chunks)}
+    yield f"data: {json.dumps(payload)}\n\n"
+
+    if persist_done_history and session_id and persisted_state is not None:
+        # Persist updated chat_history back to the session DB
+        persisted_state["chat_history"] = payload.get("chat_history", persisted_state.get("chat_history", []))
+        save_session(session_id, persisted_state)
 
 
 @app.get("/session/{session_id}", response_model=SessionResponse)

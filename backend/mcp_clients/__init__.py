@@ -34,6 +34,36 @@ logger = logging.getLogger(__name__)
 
 GITHUB_MCP_BINARY = "github-mcp-server"
 
+# Module-level singleton populated by MCPRegistry.start(). Graph nodes import the
+# accessor functions below to find loaded tools without needing FastAPI app state.
+_registry: "MCPRegistry | None" = None
+
+
+def get_registry() -> "MCPRegistry":
+    if _registry is None:
+        raise RuntimeError("MCPRegistry not started. Has FastAPI lifespan run?")
+    return _registry
+
+
+def get_codebase_tools() -> list[BaseTool]:
+    return get_registry().codebase_tools
+
+
+def get_github_tools() -> list[BaseTool]:
+    return get_registry().github_tools
+
+
+def get_tool_by_name(name: str) -> BaseTool | None:
+    reg = get_registry()
+    for t in (*reg.codebase_tools, *reg.github_tools):
+        if t.name == name:
+            return t
+    return None
+
+
+def is_github_mcp_available() -> bool:
+    return _registry is not None and _registry.github_available
+
 
 class MCPRegistry:
     """Holds open MCP client sessions + their loaded LangChain tools.
@@ -50,6 +80,8 @@ class MCPRegistry:
         self.github_available: bool = False
 
     async def start(self) -> None:
+        global _registry
+        _registry = self
         self._stack = AsyncExitStack()
         await self._stack.__aenter__()
 
@@ -105,6 +137,7 @@ class MCPRegistry:
         return session
 
     async def stop(self) -> None:
+        global _registry
         if self._stack is not None:
             try:
                 await self._stack.__aexit__(None, None, None)
@@ -116,6 +149,8 @@ class MCPRegistry:
         self.codebase_tools = []
         self.github_tools = []
         self.github_available = False
+        if _registry is self:
+            _registry = None
 
     def status(self) -> dict[str, Any]:
         return {

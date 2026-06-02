@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { api, API_BASE_URL } from '../utils/api';
-import { MessageSquare, Send, Sparkles, AlertCircle, Copy, Check } from 'lucide-react';
+import { MessageSquare, Send, Sparkles, AlertCircle, Copy, Check, GitPullRequest } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -16,6 +16,8 @@ interface ChatWorkspaceProps {
   initialHistory: ChatMessage[];
   onChatHistoryChange?: (history: ChatMessage[]) => void;
 }
+
+type WorkspaceMode = 'qa' | 'pr';
 
 const SAMPLE_PROMPTS = [
   'How do I run tests in this codebase?',
@@ -63,13 +65,14 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
 }
 
 export default function ChatWorkspace({ sessionId, initialHistory, onChatHistoryChange }: ChatWorkspaceProps) {
+  const [mode, setMode] = useState<WorkspaceMode>('qa');
   const [messages, setMessages] = useState<ChatMessage[]>(initialHistory);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamText, setStreamText] = useState('');
-  const [statusText, setStatusText] = useState('');
-  
+  const [agentStatuses, setAgentStatuses] = useState<Record<string, string>>({});
+
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Sync state if session changes
@@ -77,26 +80,36 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
     setMessages(initialHistory);
     setError(null);
     setStreamText('');
-    setStatusText('');
+    setAgentStatuses({});
   }, [sessionId, initialHistory]);
 
   // Scroll to bottom on new message or streaming updates
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading, streamText, statusText]);
+  }, [messages, loading, streamText, agentStatuses]);
+
+  const setAgentStatus = (agent: string, text: string) => {
+    setAgentStatuses((prev) => {
+      const next = { ...prev };
+      if (text) next[agent] = text;
+      else delete next[agent];
+      return next;
+    });
+  };
 
   const handleSendMessage = async (textToSend: string) => {
     if (!textToSend.trim() || loading) return;
     setError(null);
 
-    const userMessage: ChatMessage = { role: 'user', content: textToSend };
+    const trimmed = textToSend.trim();
+    const userMessage: ChatMessage = { role: 'user', content: trimmed };
     const updatedUserMessages = [...messages, userMessage];
     setMessages(updatedUserMessages);
     onChatHistoryChange?.(updatedUserMessages);
     setInput('');
     setLoading(true);
     setStreamText('');
-    setStatusText('');
+    setAgentStatuses({});
 
     try {
       const localKey = typeof window !== 'undefined' ? localStorage.getItem('model_api_key') || '' : '';
@@ -107,14 +120,19 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
         headers['x-model-api-key'] = localKey;
       }
 
-      const response = await fetch(`${API_BASE_URL}/ask`, {
+      const endpoint = mode === 'pr' ? '/review-pr' : '/ask';
+      const body = mode === 'pr'
+        ? { pr_url: trimmed, session_id: sessionId || undefined }
+        : {
+            session_id: sessionId,
+            question: trimmed,
+            chat_history: messages.map((msg) => ({ role: msg.role, content: msg.content })),
+          };
+
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          session_id: sessionId,
-          question: textToSend.trim(),
-          chat_history: messages.map(msg => ({ role: msg.role, content: msg.content })),
-        }),
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
@@ -133,6 +151,7 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let assembledStream = '';
 
       while (true) {
         const { value, done } = await reader.read();
@@ -140,7 +159,7 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        
+
         // Retain last unfinished line
         buffer = lines.pop() || '';
 
@@ -151,20 +170,34 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
           try {
             const parsed = JSON.parse(jsonStr);
             if (parsed.event === 'token') {
+              assembledStream += parsed.text;
               setStreamText((prev) => prev + parsed.text);
             } else if (parsed.event === 'status') {
-              setStatusText(parsed.text || '');
+              // New shape: {agent, text}. Old shape (back-compat): {text} only.
+              const agent = parsed.agent || '_';
+              setAgentStatus(agent, parsed.text || '');
             } else if (parsed.event === 'error') {
               throw new Error(parsed.text);
             } else if (parsed.event === 'done') {
-              const formattedHistory = parsed.chat_history.map((msg: any) => ({
-                role: msg.role as 'user' | 'assistant',
-                content: msg.content,
-              }));
-              setMessages(formattedHistory);
-              onChatHistoryChange?.(formattedHistory);
+              // /ask returns updated chat_history; /review-pr returns {review}.
+              if (parsed.chat_history) {
+                const formattedHistory = parsed.chat_history.map((msg: any) => ({
+                  role: msg.role as 'user' | 'assistant',
+                  content: msg.content,
+                }));
+                setMessages(formattedHistory);
+                onChatHistoryChange?.(formattedHistory);
+              } else if (mode === 'pr') {
+                const review = parsed.review || assembledStream;
+                const reviewMessages: ChatMessage[] = [
+                  ...updatedUserMessages,
+                  { role: 'assistant', content: review },
+                ];
+                setMessages(reviewMessages);
+                onChatHistoryChange?.(reviewMessages);
+              }
               setStreamText('');
-              setStatusText('');
+              setAgentStatuses({});
             }
           } catch (e) {
             console.error('Error parsing stream event:', e);
@@ -176,7 +209,7 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
     } finally {
       setLoading(false);
       setStreamText('');
-      setStatusText('');
+      setAgentStatuses({});
     }
   };
 
@@ -185,20 +218,47 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
     handleSendMessage(input);
   };
 
+  const placeholder = mode === 'pr'
+    ? 'Paste a GitHub PR URL (https://github.com/owner/repo/pull/123)...'
+    : 'Ask a question about the codebase...';
+
   return (
     <div className="w-full lg:w-[480px] lg:shrink-0 flex flex-col h-full bg-zinc-950/40 border-l border-white/5 backdrop-blur-xl">
       {/* Header */}
       <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <MessageSquare className="w-4 h-4 text-brand-indigo" />
+          {mode === 'pr' ? (
+            <GitPullRequest className="w-4 h-4 text-brand-indigo" />
+          ) : (
+            <MessageSquare className="w-4 h-4 text-brand-indigo" />
+          )}
           <h3 className="text-xs font-semibold text-zinc-100 uppercase tracking-wider">
-            Conversational Agent
+            {mode === 'pr' ? 'PR Review Agent' : 'Conversational Agent'}
           </h3>
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-mono">
           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
           Active Session
         </div>
+      </div>
+
+      {/* Mode toggle */}
+      <div className="px-6 py-2.5 border-b border-white/5 flex gap-1.5">
+        {(['qa', 'pr'] as WorkspaceMode[]).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMode(m)}
+            disabled={loading}
+            className={`text-[10px] font-semibold uppercase tracking-wider px-3 py-1.5 rounded-lg border transition-colors ${
+              mode === m
+                ? 'bg-brand-indigo/15 border-brand-indigo/40 text-brand-indigo'
+                : 'bg-white/[0.02] border-white/5 text-zinc-500 hover:text-zinc-300'
+            } disabled:opacity-40`}
+          >
+            {m === 'qa' ? 'Q&A' : 'PR Review'}
+          </button>
+        ))}
       </div>
 
       {/* Messages */}
@@ -296,21 +356,26 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
           </div>
         )}
 
-        {/* Live status banner */}
-        {loading && statusText && (
-          <div className="flex justify-start">
-            <div className="bg-brand-indigo/[0.03] border border-brand-indigo/15 rounded-2xl rounded-tl-none px-4 py-3 max-w-[80%] flex items-center gap-2 text-[10px] font-mono text-brand-indigo/80">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-indigo opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-brand-indigo"></span>
-              </span>
-              {statusText}
-            </div>
+        {/* Per-agent status pills */}
+        {loading && Object.keys(agentStatuses).length > 0 && (
+          <div className="flex flex-col items-start gap-1.5">
+            {Object.entries(agentStatuses).map(([agent, text]) => (
+              <div
+                key={agent}
+                className="bg-brand-indigo/[0.03] border border-brand-indigo/15 rounded-2xl rounded-tl-none px-3 py-2 flex items-center gap-2 text-[10px] font-mono text-brand-indigo/80"
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-indigo opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-brand-indigo"></span>
+                </span>
+                <span>{text}</span>
+              </div>
+            ))}
           </div>
         )}
 
         {/* Fallback dotted loader */}
-        {loading && !streamText && !statusText && (
+        {loading && !streamText && Object.keys(agentStatuses).length === 0 && (
           <div className="flex justify-start">
             <div className="bg-white/5 border border-white/5 rounded-2xl rounded-tl-none px-4 py-3 max-w-[80%] flex items-center gap-1">
               <span className="dot-anim w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce"></span>
@@ -330,8 +395,8 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
         <div ref={chatEndRef} />
       </div>
 
-      {/* Suggested Prompts */}
-      {messages.length === 0 && (
+      {/* Suggested Prompts (Q&A only) */}
+      {mode === 'qa' && messages.length === 0 && (
         <div className="px-6 py-3 bg-zinc-950/20 border-t border-white/5">
           <span className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider block mb-2">
             Suggested Prompts
@@ -355,7 +420,7 @@ export default function ChatWorkspace({ sessionId, initialHistory, onChatHistory
         <div className="relative flex items-center">
           <input
             type="text"
-            placeholder="Ask a question about the codebase..."
+            placeholder={placeholder}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={loading}

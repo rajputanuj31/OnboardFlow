@@ -39,6 +39,15 @@ export interface SessionResponse {
 export interface HealthResponse {
   status: string;
   sessions: number;
+  mcp?: {
+    codebase?: { connected: boolean; tool_count: number };
+    github?: { connected: boolean; available: boolean; tool_count: number };
+  };
+}
+
+export interface PRReviewRequest {
+  pr_url: string;
+  session_id?: string;
 }
 
 class ApiError extends Error {

@@ -186,6 +186,21 @@ def parse_github_repo_url(url: str) -> str:
     return match.group(1)
 
 
+def parse_github_pr_url(url: str) -> tuple[str, str, int]:
+    """Parse a GitHub PR URL into (owner, repo, pr_number).
+
+    Accepts forms like https://github.com/owner/repo/pull/123 (with or without trailing slash).
+    """
+    url = url.strip().rstrip("/")
+    pattern = r"https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)"
+    match = re.match(pattern, url, re.IGNORECASE)
+    if not match:
+        raise ValueError(
+            "Invalid GitHub PR URL format. Must be like https://github.com/owner/repo/pull/123"
+        )
+    return match.group(1), match.group(2), int(match.group(3))
+
+
 async def fetch_repo_details(repo: str) -> RepoDetails:
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Step 1: Fetch repository base details (including default branch)

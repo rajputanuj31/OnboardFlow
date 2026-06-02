@@ -54,3 +54,11 @@ class SessionResponse(BaseModel):
     repo_stars: int = 0
     architecture: str = ""
     chat_history: list[dict] = Field(default_factory=list)
+
+
+class PRReviewRequest(BaseModel):
+    pr_url: str = Field(description="e.g. https://github.com/owner/repo/pull/123")
+    session_id: str | None = Field(
+        default=None,
+        description="Optional: provide if the repo has been ingested. Lets agents read codebase context."
+    )
