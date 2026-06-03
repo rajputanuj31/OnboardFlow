@@ -41,11 +41,6 @@ class QuestionRequest(BaseModel):
     chat_history: list[dict] | None = None
 
 
-class QuestionResponse(BaseModel):
-    answer: str
-    chat_history: list[dict]
-
-
 class SessionResponse(BaseModel):
     exists: bool
     repo_name: str = ""

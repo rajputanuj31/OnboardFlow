@@ -1,8 +1,3 @@
-"""Launcher: `python -m mcp_servers <name>`.
-
-Currently supports:
-- `codebase` — the project's Codebase MCP server
-"""
 import sys
 
 

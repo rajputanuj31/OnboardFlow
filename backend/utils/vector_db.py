@@ -19,7 +19,10 @@ def _get_client() -> QdrantClient:
     if _client is None:
         url = settings.qdrant_url
         if url.startswith("http://") or url.startswith("https://"):
-            _client = QdrantClient(url=url)
+            _client = QdrantClient(
+                url=url,
+                api_key=settings.qdrant_api_key if settings.qdrant_api_key else None
+            )
         else:
             _client = QdrantClient(path=url)
     return _client

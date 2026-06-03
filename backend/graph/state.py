@@ -7,11 +7,20 @@ def _merge_dict(a: dict, b: dict) -> dict:
 
 
 class RepoState(TypedDict):
+    """State for the ingest graph + the long-lived session snapshot persisted in SQLite.
+
+    The Q&A and PR-review flows use their own narrower TypedDicts (QAState,
+    PRReviewState) — `RepoState` is intentionally limited to what /ingest fills
+    and what later flows hydrate from.
+
+    NOTE: the user's model API key must NEVER be added to any graph state —
+    state is serialized into LangSmith traces and the persisted session DB.
+    It travels via a request-scoped ContextVar instead (see graph/helpers.py).
+    """
     session_id: str
     repo_url: str
-    model_api_key: str
 
-    # ── Fetched from GitHub (filled by ingest node) ──────────────────────────
+    # Fetched from GitHub (filled by ingest_repo)
     repo_name: str
     repo_description: str
     repo_language: str
@@ -23,20 +32,12 @@ class RepoState(TypedDict):
     contributing: str
     fetched_files: dict[str, str]
 
-    # ── LLM-generated (filled by summarize node) ──────────────────────────────
+    # LLM-generated (filled by summarize_* nodes)
     repo_summary: str
     architecture_notes: str
 
-    # ── Conversation (filled by answer node) ──────────────────────────────────
+    # Conversation history (kept on RepoState so /session can return it)
     chat_history: list[dict]
-    current_question: str
-    current_answer: str
-
-    # ── ReAct loop state (managed by answer node) ─────────────────────────────
-    needs_tool_call: bool
-    tool_calls_made: int
-    messages: list
-    rag_context: str
 
 
 class QAState(TypedDict):
@@ -47,7 +48,6 @@ class QAState(TypedDict):
     parallel — the Annotated reducer merges their per-key writes.
     """
     session_id: str
-    model_api_key: str
 
     # Repo context (read-only during Q&A)
     repo_name: str
@@ -74,7 +74,6 @@ class PRReviewState(TypedDict):
     via the Codebase MCP tools. Without it, agents work from the diff alone.
     """
     session_id: str | None
-    model_api_key: str
 
     # Input
     pr_url: str

@@ -1,10 +1,12 @@
-# pyrefly: ignore [missing-import]
 import sqlite3
 import json
+import logging
 import time
 import hashlib
 import httpx
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 CACHE_DB = Path(__file__).resolve().parent.parent / ".cache" / "http_cache.db"
 
@@ -29,8 +31,7 @@ class SQLiteCache:
                 """)
                 conn.commit()
         except Exception as e:
-            # Fallback or silent ignore during startup
-            print(f"Cache init failed: {e}")
+            logger.warning("HTTP cache init failed: %s", e)
 
     def get(self, key: str) -> tuple[str, int, dict] | None:
         try:
@@ -51,7 +52,7 @@ class SQLiteCache:
                     return None
                 return value, status_code, json.loads(headers_json)
         except Exception as e:
-            print(f"Cache get error: {e}")
+            logger.warning("HTTP cache get error: %s", e)
             return None
 
     def set(self, key: str, value: str, status_code: int, headers: dict, ttl: float):
@@ -66,7 +67,7 @@ class SQLiteCache:
                 )
                 conn.commit()
         except Exception as e:
-            print(f"Cache set error: {e}")
+            logger.warning("HTTP cache set error: %s", e)
 
 _cache = SQLiteCache()
 

@@ -6,10 +6,26 @@ from graph.ingest_nodes import (
     summarize_architecture,
     join_summaries,
 )
+from graph.pr_review_nodes import (
+    PR_SPECIALIST_NAMES,
+    code_explainer,
+    fetch_pr,
+    impact_analyst,
+    risk_assessor,
+)
+from graph.pr_review_nodes import synthesizer as pr_synthesizer
+from graph.qa_agent_nodes import (
+    SPECIALIST_NAMES,
+    arch_explainer,
+    code_reader,
+    dep_tracer,
+    fan_out_to_specialists,
+    router,
+    update_history,
+)
+from graph.qa_agent_nodes import synthesizer as qa_synthesizer
 from graph.state import PRReviewState, QAState, RepoState
 
-
-# ── Ingest graph (unchanged from v1) ──────────────────────────────────────────
 
 def build_ingest_graph():
     """
@@ -33,34 +49,19 @@ def build_ingest_graph():
     return graph.compile()
 
 
-# ── Q&A graph (v2 multi-agent) ────────────────────────────────────────────────
-
 def build_qa_graph():
     """
     router ─┬─> code_reader ──────┐
             ├─> arch_explainer ───┼─> synthesizer ──> update_history ──> END
             └─> dep_tracer ───────┘
     """
-    # Imported here to avoid pulling MCP/LangGraph prebuilt deps at module import
-    # time (keeps `ingest_graph` instantiable even before MCP is wired).
-    from graph.qa_agent_nodes import (
-        arch_explainer,
-        code_reader,
-        dep_tracer,
-        fan_out_to_specialists,
-        router,
-        synthesizer,
-        update_history,
-        SPECIALIST_NAMES,
-    )
-
     graph = StateGraph(QAState)
 
     graph.add_node("router", router)
     graph.add_node("code_reader", code_reader)
     graph.add_node("arch_explainer", arch_explainer)
     graph.add_node("dep_tracer", dep_tracer)
-    graph.add_node("synthesizer", synthesizer)
+    graph.add_node("synthesizer", qa_synthesizer)
     graph.add_node("update_history", update_history)
 
     graph.add_edge(START, "router")
@@ -75,30 +76,19 @@ def build_qa_graph():
     return graph.compile()
 
 
-# ── PR review graph (v2 — Phase 4) ────────────────────────────────────────────
-
 def build_pr_review_graph():
     """
     fetch_pr ─┬─> code_explainer ─┐
               ├─> impact_analyst ─┼─> synthesizer ──> END
               └─> risk_assessor ──┘
     """
-    from graph.pr_review_nodes import (
-        code_explainer,
-        fetch_pr,
-        impact_analyst,
-        risk_assessor,
-        synthesizer,
-        PR_SPECIALIST_NAMES,
-    )
-
     graph = StateGraph(PRReviewState)
 
     graph.add_node("fetch_pr", fetch_pr)
     graph.add_node("code_explainer", code_explainer)
     graph.add_node("impact_analyst", impact_analyst)
     graph.add_node("risk_assessor", risk_assessor)
-    graph.add_node("synthesizer", synthesizer)
+    graph.add_node("synthesizer", pr_synthesizer)
 
     graph.add_edge(START, "fetch_pr")
     for name in PR_SPECIALIST_NAMES:

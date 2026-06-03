@@ -58,36 +58,6 @@ Rules:
 - Only reference files/modules that are actually present above
 """
 
-# ── Answer node ───────────────────────────────────────────────────────────────
-
-ANSWER_QUESTION_PROMPT = """\
-You are an expert on the "{repo_name}" GitHub repository.
-
-Here is everything you know about it:
-
-## Summary
-{repo_summary}
-
-## Architecture
-{architecture_notes}
-
-## Key File Contents
-{file_contents}
-
-## Conversation So Far
-{chat_history}
-
-## User's Question
-{question}
-
-Answer based strictly on the repository content above.
-- Be specific — reference actual files, functions, and class names by name
-- Include small code snippets when they add clarity
-- If the answer requires a file you don't have, say exactly which file would help
-- Keep answers focused and practical (no filler)
-"""
-
-
 # ── Multi-agent Q&A (v2) ──────────────────────────────────────────────────────
 
 ROUTER_PROMPT = """\
@@ -309,6 +279,57 @@ Rules:
 
 Session ID for tool calls (may be empty if no repo was pre-ingested): {session_id}
 """
+
+QA_JUDGE_PROMPT = """\
+You are a strict evaluator scoring a multi-agent Q&A system's answer about \
+the "{repo_name}" GitHub repository.
+
+Score the answer on three axes (1-5, integers):
+- accuracy: are the claims correct given the retrieved context? 5 = all claims grounded in context, 1 = mostly fabricated.
+- completeness: did it address the user's question fully? 5 = full answer, 1 = barely addresses it.
+- groundedness: does the answer reference real files/symbols visible in the retrieved snippets? 5 = every concrete claim grounded; 1 = references invented file/symbol names.
+
+Also list failure modes from this fixed set (zero or more):
+  hallucinated_file, hallucinated_symbol, missing_evidence, off_topic, repetitive, too_vague, contradicts_context
+
+## User question
+{question}
+
+## Retrieved code snippets (RAG context)
+{rag_context}
+
+## Final answer produced
+{answer}
+
+Respond with ONLY a JSON object matching this schema:
+{{"accuracy": int, "completeness": int, "groundedness": int, "rationale": str, "failure_modes": list[str]}}
+"""
+
+PR_REVIEW_JUDGE_PROMPT = """\
+You are a strict evaluator scoring a multi-agent PR review.
+
+Score the review on three axes (1-5, integers):
+- accuracy: did it correctly describe what the PR changes? 5 = matches the diff exactly, 1 = mischaracterizes the PR.
+- completeness: did it cover Summary, Impact, Risks, and Suggested Questions adequately? 5 = thorough on all four; 1 = mostly empty / off-topic.
+- groundedness: did claims in Impact / Risks reference real symbols / files / lines visible in the diff? 5 = every claim grounded; 1 = invented or generic.
+
+Failure modes (zero or more from): missed_security_risk, false_positive_risk, missed_impact, hallucinated_caller, missed_test_gap, too_vague, off_topic
+
+## PR title
+{pr_title}
+
+## Diff (truncated)
+```diff
+{pr_diff}
+```
+
+## Review produced
+{review}
+
+Respond with ONLY a JSON object matching this schema:
+{{"accuracy": int, "completeness": int, "groundedness": int, "rationale": str, "failure_modes": list[str]}}
+"""
+
 
 PR_SYNTHESIZER_PROMPT = """\
 You are the synthesizer for a multi-agent PR review system.

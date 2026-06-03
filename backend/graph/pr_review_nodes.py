@@ -49,8 +49,7 @@ def _tools_for(names: list[str]) -> list:
 async def _call_github_tool(tool_name: str, args: dict[str, Any]) -> Any:
     """Invoke a GitHub MCP tool by name. Returns parsed JSON when possible, else raw text.
 
-    Tool names follow the github/github-mcp-server contract: `get_pull_request`,
-    `get_pull_request_files`, `get_pull_request_diff`.
+    Tool names follow the github/github-mcp-server contract: `pull_request_read`, etc.
     """
     tool = get_tool_by_name(tool_name)
     if tool is None:
@@ -102,11 +101,19 @@ async def fetch_pr(state: PRReviewState) -> dict:
     owner = state["pr_owner"]
     repo = state["pr_repo"]
     pull_number = state["pr_number"]
-    base_args = {"owner": owner, "repo": repo, "pull_number": pull_number}
 
-    pr_meta_raw = await _call_github_tool("get_pull_request", base_args)
-    pr_files_raw = await _call_github_tool("get_pull_request_files", base_args)
-    pr_diff_raw = await _call_github_tool("get_pull_request_diff", base_args)
+    pr_meta_raw = await _call_github_tool(
+        "pull_request_read",
+        {"owner": owner, "repo": repo, "pullNumber": pull_number, "method": "get"},
+    )
+    pr_files_raw = await _call_github_tool(
+        "pull_request_read",
+        {"owner": owner, "repo": repo, "pullNumber": pull_number, "method": "get_files"},
+    )
+    pr_diff_raw = await _call_github_tool(
+        "pull_request_read",
+        {"owner": owner, "repo": repo, "pullNumber": pull_number, "method": "get_diff"},
+    )
 
     pr_metadata: dict[str, Any] = {}
     if isinstance(pr_meta_raw, dict):
@@ -156,7 +163,7 @@ async def _run_specialist(
     system_prompt = prompt_template.format(**args)
 
     tools = _tools_for(tool_names) if state.get("session_id") else []
-    llm = _llm(state.get("model_api_key", ""))
+    llm = _llm()
     agent = create_react_agent(model=llm, tools=tools, prompt=SystemMessage(content=system_prompt))
 
     config: RunnableConfig = {
@@ -212,7 +219,7 @@ async def synthesizer(state: PRReviewState) -> dict:
         pr_author=meta.get("author", ""),
     )
 
-    llm = _llm(state.get("model_api_key", "")).with_config(
+    llm = _llm().with_config(
         tags=["final", "agent:synthesizer"], run_name="synthesizer"
     )
     response = await llm.ainvoke([HumanMessage(content=prompt)])

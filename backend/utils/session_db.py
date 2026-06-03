@@ -6,6 +6,10 @@ from pathlib import Path
 DB_DIR = Path(__file__).resolve().parent.parent / ".cache"
 DB_PATH = DB_DIR / "sessions.db"
 
+# Keys that must never be written to disk. The user's model API key is meant to
+# live only in their browser and in-memory per request.
+_SECRET_KEYS = ("model_api_key",)
+
 def init_db():
     """Ensure cache folder exists and initialize SQLite sessions table."""
     os.makedirs(DB_DIR, exist_ok=True)
@@ -17,6 +21,7 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        _scrub_persisted_secrets(conn)
         conn.commit()
     try:
         from utils.vector_db import init_vector_db
@@ -24,9 +29,26 @@ def init_db():
     except ImportError:
         pass
 
+def _scrub_persisted_secrets(conn: sqlite3.Connection) -> None:
+    """One-time migration: strip secrets from sessions saved by older versions."""
+    rows = conn.execute("SELECT session_id, session_data FROM sessions").fetchall()
+    for session_id, data in rows:
+        try:
+            state = json.loads(data)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(state, dict) and any(k in state for k in _SECRET_KEYS):
+            for k in _SECRET_KEYS:
+                state.pop(k, None)
+            conn.execute(
+                "UPDATE sessions SET session_data = ? WHERE session_id = ?",
+                (json.dumps(state), session_id),
+            )
+
 def save_session(session_id: str, state: dict) -> None:
-    """Serialize the session state to JSON and write to SQLite."""
-    serialized = json.dumps(state)
+    """Serialize the session state to JSON and write to SQLite. Secrets are
+    stripped — the user's API key must never be persisted server-side."""
+    serialized = json.dumps({k: v for k, v in state.items() if k not in _SECRET_KEYS})
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO sessions (session_id, session_data, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",

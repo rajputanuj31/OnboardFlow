@@ -1,4 +1,5 @@
 import sys
+from contextvars import ContextVar
 from pathlib import Path
 from functools import lru_cache
 from langchain_openai import ChatOpenAI
@@ -10,11 +11,33 @@ from graph.state import RepoState
 from onboard_github import fetch_specific_file
 from utils.vector_db import read_file_chunks
 
-@lru_cache(maxsize=16)
+# Per-request model API key, set by the endpoints in main.py and read by _llm().
+# Deliberately kept OUT of graph state: anything in state gets serialized into
+# LangSmith traces and the persisted session snapshot, leaking the user's key.
+_request_api_key: ContextVar[str] = ContextVar("model_api_key", default="")
+
+
+def set_request_api_key(key: str) -> None:
+    """Bind the user's model API key to the current request context."""
+    _request_api_key.set(key or "")
+
+
+def get_request_api_key() -> str:
+    return _request_api_key.get()
+
+
 def _llm(api_key: str = "") -> ChatOpenAI:
-    """Lazy-initialize the LLM so load_dotenv() in main.py runs first."""
+    """Lazy-initialize the LLM so load_dotenv() in main.py runs first.
+
+    Resolution order: explicit arg > request context > backend .env key.
+    """
     from config import settings
-    key = api_key or settings.openai_api_key
+    key = api_key or _request_api_key.get() or settings.openai_api_key
+    return _cached_llm(key)
+
+
+@lru_cache(maxsize=16)
+def _cached_llm(key: str) -> ChatOpenAI:
     return ChatOpenAI(model="gpt-4o-mini", max_tokens=1024, temperature=0.0, streaming=True, api_key=key)
 
 

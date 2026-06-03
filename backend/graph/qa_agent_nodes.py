@@ -85,7 +85,7 @@ async def router(state: QAState) -> dict:
         question=state["current_question"],
     )
 
-    llm = _llm(state.get("model_api_key", "")).with_structured_output(_RouterDecision)
+    llm = _llm().with_structured_output(_RouterDecision)
     config: RunnableConfig = {"tags": ["agent:router"], "run_name": "router"}
     try:
         decision: _RouterDecision = await llm.ainvoke([HumanMessage(content=prompt)], config=config)
@@ -109,7 +109,7 @@ async def _run_specialist(
     tool_names: list[str],
 ) -> dict:
     tools = _tools_for(tool_names)
-    llm = _llm(state.get("model_api_key", ""))
+    llm = _llm()
     agent = create_react_agent(model=llm, tools=tools, prompt=SystemMessage(content=system_prompt))
 
     config: RunnableConfig = {
@@ -191,7 +191,7 @@ async def synthesizer(state: QAState) -> dict:
         question=state["current_question"],
     )
 
-    llm = _llm(state.get("model_api_key", "")).with_config(
+    llm = _llm().with_config(
         tags=["final", "agent:synthesizer"], run_name="synthesizer"
     )
     response = await llm.ainvoke([HumanMessage(content=prompt)])

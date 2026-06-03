@@ -8,13 +8,15 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
+from graph.evaluator import evaluate_pr_review, evaluate_qa, spawn_eval
 from graph.graph import ingest_graph, pr_review_graph, qa_graph
+from graph.helpers import set_request_api_key
 from graph.state import PRReviewState, QAState, RepoState
 from mcp_clients import MCPRegistry, is_github_mcp_available
 from models import (
     IngestRequest, IngestResponse,
     PRReviewRequest,
-    QuestionRequest, QuestionResponse,
+    QuestionRequest,
     SessionResponse,
 )
 from onboard_github import parse_github_pr_url
@@ -60,9 +62,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Session storage is handled persistently via SQLite database file (.cache/sessions.db)
-
-
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.post("/ingest", response_model=IngestResponse)
@@ -78,11 +77,13 @@ async def ingest_endpoint(req: IngestRequest, x_model_api_key: str | None = Head
             detail="Model API Key is required. Please enter it in the Ingest screen."
         )
 
+    # The key lives in a request-scoped ContextVar, NOT in graph state, so it
+    # never reaches LangSmith traces or the persisted session snapshot.
+    set_request_api_key(api_key)
+
     initial_state: RepoState = {
         "session_id": req.session_id,
         "repo_url": req.repo_url,
-        "model_api_key": api_key,
-        # Fetch fields (filled by ingest node)
         "repo_name": "",
         "repo_description": "",
         "repo_language": "",
@@ -93,18 +94,9 @@ async def ingest_endpoint(req: IngestRequest, x_model_api_key: str | None = Head
         "readme": "",
         "contributing": "",
         "fetched_files": {},
-        # LLM fields (filled by summarize node)
         "repo_summary": "",
         "architecture_notes": "",
-        # Conversation
         "chat_history": [],
-        "current_question": "",
-        "current_answer": "",
-        # ReAct loop state
-        "needs_tool_call": False,
-        "tool_calls_made": 0,
-        "messages": [],
-        "rag_context": "",
     }
 
     try:
@@ -138,7 +130,7 @@ async def ask_endpoint(req: QuestionRequest, x_model_api_key: str | None = Heade
     if not persisted:
         raise HTTPException(status_code=404, detail="Session not found. Call /ingest first.")
 
-    api_key = x_model_api_key or persisted.get("model_api_key") or settings.openai_api_key
+    api_key = x_model_api_key or settings.openai_api_key
     if not api_key:
         raise HTTPException(status_code=400, detail="Model API Key is required. Please configure it.")
 
@@ -146,7 +138,6 @@ async def ask_endpoint(req: QuestionRequest, x_model_api_key: str | None = Heade
 
     qa_state: QAState = {
         "session_id": req.session_id,
-        "model_api_key": api_key,
         "repo_name": persisted.get("repo_name", ""),
         "repo_summary": persisted.get("repo_summary", ""),
         "architecture_notes": persisted.get("architecture_notes", ""),
@@ -161,6 +152,7 @@ async def ask_endpoint(req: QuestionRequest, x_model_api_key: str | None = Heade
     return StreamingResponse(
         _stream_multi_agent(
             graph=qa_graph,
+            model_api_key=api_key,
             initial_state=qa_state,
             persisted_state=persisted,
             persist_key="chat_history",
@@ -173,6 +165,12 @@ async def ask_endpoint(req: QuestionRequest, x_model_api_key: str | None = Heade
             },
             persist_done_history=True,
             session_id=req.session_id,
+            eval_kind="qa",
+            eval_extra={
+                "question": req.question,
+                "repo_name": persisted.get("repo_name", ""),
+                "api_key": api_key,
+            },
         ),
         media_type="text/event-stream",
     )
@@ -196,16 +194,11 @@ async def review_pr_endpoint(req: PRReviewRequest, x_model_api_key: str | None =
         raise HTTPException(status_code=400, detail=str(e))
 
     api_key = x_model_api_key or settings.openai_api_key
-    if req.session_id:
-        s = get_session(req.session_id)
-        if s and not api_key:
-            api_key = s.get("model_api_key", "")
     if not api_key:
         raise HTTPException(status_code=400, detail="Model API Key is required.")
 
     pr_state: PRReviewState = {
         "session_id": req.session_id,
-        "model_api_key": api_key,
         "pr_url": req.pr_url,
         "pr_owner": owner,
         "pr_repo": repo,
@@ -220,6 +213,7 @@ async def review_pr_endpoint(req: PRReviewRequest, x_model_api_key: str | None =
     return StreamingResponse(
         _stream_multi_agent(
             graph=pr_review_graph,
+            model_api_key=api_key,
             initial_state=pr_state,
             persisted_state=None,
             persist_key=None,
@@ -227,6 +221,8 @@ async def review_pr_endpoint(req: PRReviewRequest, x_model_api_key: str | None =
             done_payload_builder=lambda chunks: {"review": "".join(chunks)},
             persist_done_history=False,
             session_id=None,
+            eval_kind="pr_review",
+            eval_extra={"api_key": api_key},
         ),
         media_type="text/event-stream",
     )
@@ -242,6 +238,7 @@ def _agent_from_tags(tags: list[str] | None) -> str | None:
 async def _stream_multi_agent(
     *,
     graph,
+    model_api_key: str,
     initial_state: dict,
     persisted_state: dict | None,
     persist_key: str | None,
@@ -249,14 +246,43 @@ async def _stream_multi_agent(
     done_payload_builder,
     persist_done_history: bool,
     session_id: str | None,
+    eval_kind: str | None = None,
+    eval_extra: dict | None = None,
 ):
+    # The streaming generator runs in its own task — bind the user's key to
+    # this request context so graph nodes can build LLMs without putting the
+    # key in state (state is serialized into LangSmith traces).
+    set_request_api_key(model_api_key)
+
     final_chunks: list[str] = []
+    run_id: str | None = None
+    captured_specialist_outputs: dict[str, str] = {}
+    pr_metadata: dict = {}
+    pr_diff: str = ""
+
     try:
         async for event in graph.astream_events(initial_state, version="v2"):
             kind = event.get("event")
             name = event.get("name")
             tags = event.get("tags") or []
             agent = _agent_from_tags(tags)
+
+            # Capture run_id from the first event we see — this is the graph's run.
+            if run_id is None and event.get("run_id"):
+                run_id = str(event["run_id"])
+
+            # Capture node outputs we'll feed to the judge later.
+            if kind == "on_chain_end" and name in ("code_reader", "arch_explainer", "dep_tracer",
+                                                    "code_explainer", "impact_analyst", "risk_assessor"):
+                out = event["data"].get("output") or {}
+                so = out.get("specialist_outputs") or {}
+                if isinstance(so, dict):
+                    captured_specialist_outputs.update(so)
+            elif kind == "on_chain_end" and name == "fetch_pr":
+                out = event["data"].get("output") or {}
+                if isinstance(out, dict):
+                    pr_metadata = out.get("pr_metadata") or pr_metadata
+                    pr_diff = out.get("pr_diff") or pr_diff
 
             # 1. Stream tokens ONLY from the synthesizer (tagged "final").
             if kind == "on_chat_model_stream" and "final" in tags:
@@ -285,6 +311,7 @@ async def _stream_multi_agent(
         yield f"data: {json.dumps({'event': 'error', 'text': str(e)})}\n\n"
         return
 
+    final_text = "".join(final_chunks)
     payload = {"event": "done", **done_payload_builder(final_chunks)}
     yield f"data: {json.dumps(payload)}\n\n"
 
@@ -292,6 +319,30 @@ async def _stream_multi_agent(
         # Persist updated chat_history back to the session DB
         persisted_state["chat_history"] = payload.get("chat_history", persisted_state.get("chat_history", []))
         save_session(session_id, persisted_state)
+
+    # Fire-and-forget eval. spawn_eval no-ops if EVAL_ENABLED=false.
+    if eval_kind and final_text:
+        extra = eval_extra or {}
+        if eval_kind == "qa":
+            rag_context = "\n\n".join(
+                f"### {k}\n{v}" for k, v in captured_specialist_outputs.items()
+            )
+            spawn_eval(evaluate_qa(
+                question=extra.get("question", user_text),
+                answer=final_text,
+                rag_context=rag_context,
+                repo_name=extra.get("repo_name", ""),
+                run_id=run_id,
+                api_key=extra.get("api_key", ""),
+            ))
+        elif eval_kind == "pr_review":
+            spawn_eval(evaluate_pr_review(
+                pr_title=pr_metadata.get("title", ""),
+                pr_diff=pr_diff,
+                review=final_text,
+                run_id=run_id,
+                api_key=extra.get("api_key", ""),
+            ))
 
 
 @app.get("/session/{session_id}", response_model=SessionResponse)
@@ -324,7 +375,6 @@ def health():
     }
 
 
-# ── Dev entrypoint (triggered reload V2) ───────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

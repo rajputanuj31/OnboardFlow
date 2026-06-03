@@ -2,7 +2,7 @@ from graph.state import RepoState
 from onboard_github import fetch_repo_details, parse_github_repo_url
 from prompts import SUMMARIZE_REPO_PROMPT, ARCHITECTURE_PROMPT
 from utils.vector_db import save_repo_chunks
-from graph.helpers import _llm, _build_file_contents
+from graph.helpers import _llm, _build_file_contents, get_request_api_key
 
 
 # ── stub nodes ──────────────────────────────────────────────────────────────
@@ -22,7 +22,7 @@ async def ingest_repo(state: RepoState) -> dict:
         files=fetched_data.files,
         readme=fetched_data.readme,
         contributing=fetched_data.contributing,
-        model_api_key=state.get('model_api_key', ""),
+        model_api_key=get_request_api_key(),
     )
     
     #return metadata
@@ -66,8 +66,7 @@ async def summarize_repo_summary(state: RepoState) -> dict:
     )
     
     #call LLM A
-    model_api_key = state.get("model_api_key", "")
-    summary_resp = await _llm(model_api_key).ainvoke(prompt)
+    summary_resp = await _llm().ainvoke(prompt)
     return {"repo_summary": summary_resp.content}
 
 async def summarize_architecture(state: RepoState) -> dict:
@@ -92,9 +91,8 @@ async def summarize_architecture(state: RepoState) -> dict:
         file_contents=file_contents,
     )
     
-    #call LLM A
-    model_api_key = state.get("model_api_key", "")
-    arch_resp = await _llm(model_api_key).ainvoke(prompt)
+    #call LLM B
+    arch_resp = await _llm().ainvoke(prompt)
     return {"architecture_notes": arch_resp.content}
 
 def join_summaries(state: RepoState) -> dict:

@@ -1,3 +1,4 @@
+import logging
 import re
 import asyncio
 import httpx
@@ -5,14 +6,14 @@ from config import settings
 from models import RepoDetails
 from utils.http_cache import cached_get
 
+logger = logging.getLogger(__name__)
+
 HEADERS = {
     "Authorization": f"Bearer {settings.github_token}",
     "Accept": "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
 }
 BASE = "https://api.github.com"
-
-MAX_FILE_SIZE = 20_000
 
 PRIORITY_FILES = [
     "package.json", "composer.json", "pyproject.toml", "requirements.txt", "setup.py",
@@ -45,7 +46,8 @@ async def _get(client: httpx.AsyncClient, url: str, params: dict = {}, ttl: floa
         res = await cached_get(client, url, headers=HEADERS, params=params, ttl=ttl)
         res.raise_for_status()
         return res.json()
-    except Exception:
+    except Exception as e:
+        logger.warning("GitHub GET %s failed: %s", url, e)
         return {}
 
 
@@ -55,7 +57,8 @@ async def fetch_raw_file_content(client: httpx.AsyncClient, repo: str, filepath:
         res = await cached_get(client, f"{BASE}/repos/{repo}/contents/{filepath}", headers=headers, ttl=86400.0)
         res.raise_for_status()
         return res.text[:max_chars]
-    except Exception:
+    except Exception as e:
+        logger.warning("GitHub raw fetch %s/%s failed: %s", repo, filepath, e)
         return ""
 
 

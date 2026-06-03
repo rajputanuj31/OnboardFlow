@@ -1,18 +1,3 @@
-"""MCP client lifecycle + tool loading.
-
-Spawns the two MCP servers used by v2:
-  - codebase  — our custom server wrapping Qdrant + ingested-session data
-  - github    — the official github/github-mcp-server (optional; required for PR review)
-
-Both are stdio subprocesses managed via `AsyncExitStack`. Each server's tools
-are loaded via `langchain_mcp_adapters.tools.load_mcp_tools` and exposed to the
-rest of the app via `MCPRegistry.codebase_tools` / `.github_tools`.
-
-The GitHub MCP server is OPTIONAL: if the binary is missing or the server fails
-to start, the registry logs a warning and exposes an empty tool list. Q&A still
-works (it only needs the codebase server). PR review will fail loudly when the
-binary is needed.
-"""
 from __future__ import annotations
 
 import logging
@@ -54,6 +39,25 @@ def get_github_tools() -> list[BaseTool]:
 
 
 def get_tool_by_name(name: str) -> BaseTool | None:
+    if name == "semantic_search":
+        from langchain_core.tools import StructuredTool
+        from utils.vector_db import query_vector_db
+        from graph.helpers import get_request_api_key
+
+        async def _local_semantic_search(session_id: str, query: str, top_k: int = 4) -> list[dict]:
+            key = get_request_api_key()
+            return await query_vector_db(session_id, query, top_k=top_k, model_api_key=key)
+
+        return StructuredTool.from_function(
+            coroutine=_local_semantic_search,
+            name="semantic_search",
+            description=(
+                "Semantic search across the ingested repo's code chunks. "
+                "Returns a list of {filepath, chunk_index, content, similarity} dicts, "
+                "ordered by descending similarity. Limited to chunks belonging to session_id."
+            )
+        )
+
     reg = get_registry()
     for t in (*reg.codebase_tools, *reg.github_tools):
         if t.name == name:
@@ -105,7 +109,18 @@ class MCPRegistry:
             raise  # Codebase MCP is critical; surface failure at boot.
 
         # GitHub MCP server (optional): only attempt if binary is on PATH.
-        if shutil.which(GITHUB_MCP_BINARY) is None:
+        binary_path = shutil.which(GITHUB_MCP_BINARY)
+        if binary_path is None:
+            fallback_paths = [
+                backend_root / "bin" / GITHUB_MCP_BINARY,
+                Path.home() / "go" / "bin" / GITHUB_MCP_BINARY,
+            ]
+            for path in fallback_paths:
+                if path.is_file() and os.access(path, os.X_OK):
+                    binary_path = str(path)
+                    break
+
+        if binary_path is None:
             logger.warning(
                 "GitHub MCP binary %r not found on PATH; PR-review tooling disabled. "
                 "Install with: go install github.com/github/github-mcp-server@latest",
@@ -114,7 +129,7 @@ class MCPRegistry:
             return
 
         github_params = StdioServerParameters(
-            command=GITHUB_MCP_BINARY,
+            command=binary_path,
             args=["stdio"],
             env={
                 "GITHUB_PERSONAL_ACCESS_TOKEN": settings.github_token,

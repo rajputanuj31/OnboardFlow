@@ -207,7 +207,7 @@ export default function IngestPanel({ onIngestSuccess, existingSessionIds, apiKe
             <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div className="text-xs text-amber-300 leading-relaxed">
               <span className="font-semibold block mb-0.5 text-amber-200">Model API Key Required</span>
-              Please configure your OpenAI API Key in the sidebar settings. Your key is stored locally in your browser's <code className="bg-amber-500/15 px-1 py-0.5 rounded text-[10px] font-mono text-amber-200">localStorage</code> and never shared.
+              Please configure your OpenAI API Key in the sidebar settings. Your key is stored only in your browser's <code className="bg-amber-500/15 px-1 py-0.5 rounded text-[10px] font-mono text-amber-200">localStorage</code> — it is sent with each request but never stored or logged on the server.
             </div>
           </div>
         )}
