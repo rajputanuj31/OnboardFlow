@@ -20,7 +20,7 @@ is X, what does this change break?* OnboardFlow v3 answers with citations to exa
 | Area | State |
 |---|---|
 | Scaffold: API, typed config, Postgres + Qdrant, CI | done |
-| Eval harness + v2 baseline | next |
+| Eval harness (5 suites' worth of data, judge, paired CIs) | done; v2 baseline run pending |
 | Ingestion, agent, retrieval, PR review, web app | planned |
 
 ## Run it locally
@@ -40,5 +40,6 @@ Checks: `make lint typecheck test`, `make test-integration` (needs `make up`), `
 ## Repository layout
 ```
 apps/api/         FastAPI backend (Python 3.13, package `onboardflow`)
+evals/            eval harness, datasets, results
 infra/            docker compose for Postgres + Qdrant
 ```

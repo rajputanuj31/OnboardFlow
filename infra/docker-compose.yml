@@ -39,6 +39,22 @@ services:
       retries: 30
     restart: unless-stopped
 
+  qdrant-v2:
+    # Separate Qdrant used only by the v2 baseline (`make up-baseline`), so v2's data never
+    # mixes with v3's. Same pinned image.
+    image: qdrant/qdrant:v1.20.2
+    profiles: ["baseline"]
+    ports:
+      - "${QDRANT_V2_HTTP_PORT:-6343}:6333"
+    volumes:
+      - qdrant_v2_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
 volumes:
   postgres_data:
   qdrant_data:
+  qdrant_v2_data:

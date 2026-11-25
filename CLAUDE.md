@@ -2,19 +2,26 @@
 
 OnboardFlow v3 is being rebuilt step by step. The owner's design plan and build plan live in
 `docs/plans/` (local only, gitignored, never commit them). Read the current step in the build
-plan before starting work. v2 is preserved at git tag `v2.0.0`.
+plan before starting work. v2 is preserved at git tag `v2.0.0` and on `main`. All v3 work happens on the `v3` branch; never commit or push to `main` (it has live deployments).
 
 ## Layout
 - `apps/api/` — FastAPI backend, Python 3.13, package `onboardflow` (src layout), managed with uv.
 - `apps/worker/` (step 3), `apps/web/` (step 8) — added later.
 - `infra/` — docker compose for Postgres + Qdrant (server mode).
-- `evals/` (step 2) — datasets, suites, judge, reports.
+- `evals/` — eval harness (package `onboardflow_evals`, own uv project): `data/` (committed JSONL
+  datasets), `runs/` (committed results), `reports/` (generated), `.cache/` (gitignored: LLM-call
+  cache, raw downloads, the v2 baseline install).
 
 ## Commands (run from repo root)
 - `make install` · `make up` / `make down` · `make dev`
 - `make lint` · `make typecheck` · `make test` · `make test-integration` (needs `make up`)
 - `make env-example` after any change to `settings.py`
 - `make audit` · `make secrets-scan`
+- Evals: `make eval-estimate` (free) · `make eval-quick` · `make eval-baseline` · `make eval-report`.
+  Keys come from the repo-root `.env`: `OPENAI_API_KEY` and `GITHUB_TOKEN` (v2 baseline only).
+  Models: answerer `gpt-6.1-terra`, judge `gpt-6.2-sol` (a different, stronger model), embeddings
+  `text-embedding-3-small`. OpenAI only; Anthropic is optional (step 7 model comparison).
+  Every run prints a cost estimate and stops above `EVAL_BUDGET_USD` without `--yes`.
 
 ## Rules
 - **Config:** every tunable value goes in `onboardflow/settings.py` (typed, env-driven). No `os.getenv`,

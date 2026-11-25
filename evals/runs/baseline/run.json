@@ -1,0 +1,27 @@
+{
+  "name": "baseline",
+  "created_at": "2026-11-25T15:12:15+00:00",
+  "judge_model": "gpt-6.2-sol",
+  "datasets": {
+    "answer": "695c892df40948a1",
+    "localization": "65617d2aa5665fea",
+    "abstention": "d9c70d13f85fda01"
+  },
+  "systems": {
+    "v2": {
+      "version": "v2.0.0",
+      "model": "gpt-4o-mini",
+      "embeddings": "text-embedding-3-small",
+      "git_sha": "982b5bc03411f55b5c5fc02db49f962c4d6a87ce",
+      "recorded_at": "2026-11-25T15:12:15+00:00"
+    },
+    "no-context": {
+      "provider": "openai",
+      "model": "gpt-6.1-terra",
+      "effort": "medium",
+      "max_tokens": 8000,
+      "git_sha": "982b5bc-dirty",
+      "recorded_at": "2026-11-25T16:47:00+00:00"
+    }
+  }
+}

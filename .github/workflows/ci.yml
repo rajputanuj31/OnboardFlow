@@ -39,15 +39,32 @@ jobs:
         with:
           enable-cache: true
       - name: Install
-        run: make install
+        run: uv --directory apps/api sync --locked
       - name: Lint
-        run: make lint
+        run: uv --directory apps/api run ruff check . && uv --directory apps/api run ruff format --check .
       - name: Type check
-        run: make typecheck
+        run: uv --directory apps/api run mypy
       - name: Unit tests
-        run: make test
+        run: uv --directory apps/api run pytest
       - name: Integration tests
         run: make test-integration
+
+  evals:
+    name: evals (lint, types, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv --directory evals sync --locked
+      - name: Lint
+        run: uv --directory evals run ruff check . && uv --directory evals run ruff format --check .
+      - name: Type check
+        run: uv --directory evals run mypy
+      - name: Unit tests (hermetic, no model calls)
+        run: uv --directory evals run pytest
 
   security:
     name: security (secrets, dependencies)
