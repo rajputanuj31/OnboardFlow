@@ -1,0 +1,44 @@
+# Local development services. The API runs on the host (`make dev`) in step 1;
+# api/worker/web containers are added in step 12.
+#
+# Credentials here are for local development only. Override via environment
+# variables (POSTGRES_PASSWORD etc.) for anything that is not your laptop.
+name: onboardflow
+
+services:
+  postgres:
+    image: postgres:17.12-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-onboardflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-onboardflow}
+      POSTGRES_DB: ${POSTGRES_DB:-onboardflow}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  qdrant:
+    # Server mode only (embedded mode caused a cross-process lock clash in v2). Pinned.
+    image: qdrant/qdrant:v1.20.2
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      # The image ships without curl/wget; probe the HTTP port with bash's /dev/tcp.
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  qdrant_data:

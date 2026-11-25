@@ -1,81 +1,55 @@
-# Environment variables
+# Environment variables (only the generated example is committed)
 .env
 .env.*
 !.env.example
 
-# Python cache
+# Private planning docs (kept local, never committed)
+docs/plans/
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Virtual environments
+.venv/
 venv/
-.env/
-ENV/
-env/
-
-# Distribution / packaging
 build/
 dist/
 *.egg-info/
 
-# Logs
-*.log
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDEs / Editors
-.vscode/
-.idea/
-
-# Testing
+# Tooling caches
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
 .coverage
+coverage.xml
 htmlcov/
 
-# Type checking
-.mypy_cache/
+# Node
+node_modules/
+.next/
 
-# Jupyter
-.ipynb_checkpoints/
-
-# PyCharm
-*.iml
-
-# Mac
-.AppleDouble
-.LSOverride
-
-# FastAPI/Uvicorn
-*.pid
-
-# SQLite
-*.sqlite3
-*.db
-
-# Cache folders
+# Local data (Docker volumes, clones, eval caches)
+.data/
 .cache/
 .qdrant_storage/
+evals/.cache/
 
-# Temporary files
+# Logs / runtime
+*.log
+*.pid
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
+.vscode/
+.idea/
+*.iml
+.ipynb_checkpoints/
+
+# Misc
 tmp/
 temp/
-
-# Node (if fullstack project)
-node_modules/
-
-# Coverage reports
-coverage.xml
-
-# Ruff
-.ruff_cache/
-
-# pyright
-.pyright/
-
-# dotenv
-.python-version
-
 .jetro

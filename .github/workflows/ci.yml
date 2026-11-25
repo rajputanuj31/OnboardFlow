@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main, v3]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: api (lint, types, tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.12-alpine
+        env:
+          POSTGRES_USER: onboardflow
+          POSTGRES_PASSWORD: onboardflow
+          POSTGRES_DB: onboardflow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U onboardflow -d onboardflow"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+      qdrant:
+        image: qdrant/qdrant:v1.20.2
+        ports: ["6333:6333"]
+    env:
+      DATABASE__URL: postgresql+asyncpg://onboardflow:onboardflow@localhost:5432/onboardflow
+      QDRANT__URL: http://localhost:6333
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: true
+      - name: Install
+        run: make install
+      - name: Lint
+        run: make lint
+      - name: Type check
+        run: make typecheck
+      - name: Unit tests
+        run: make test
+      - name: Integration tests
+        run: make test-integration
+
+  security:
+    name: security (secrets, dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # gitleaks scans the full history
+      - uses: astral-sh/setup-uv@v10.4.0
+      - name: Secret scan (gitleaks)
+        run: make secrets-scan
+      - name: Dependency audit (pip-audit)
+        run: make audit
