@@ -71,6 +71,56 @@ class QdrantSettings(BaseModel):
         return None if value == "" else value
 
 
+class GitHubSettings(BaseModel):
+    api_url: AnyHttpUrl = Field(
+        default=AnyHttpUrl("https://api.github.com"), description="GitHub REST API base URL."
+    )
+    token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Optional server token, used only for server-owned metadata lookups (higher rate "
+            "limit). Never used to clone user-supplied repositories."
+        ),
+    )
+    timeout_s: float = Field(default=10.0, gt=0, description="GitHub API request timeout.")
+
+    @field_validator("token", mode="before")
+    @classmethod
+    def _blank_means_unset(cls, value: object) -> object:
+        return None if value == "" else value
+
+
+class IngestSettings(BaseModel):
+    data_dir: Path = Field(
+        default=REPO_ROOT / ".data" / "repos", description="Where snapshot checkouts are stored."
+    )
+    clone_timeout_s: float = Field(default=120.0, gt=0, description="Hard timeout for git.")
+    max_repo_mb: int = Field(
+        default=200, gt=0, description="Reject repos larger than this (GitHub-reported size)."
+    )
+    max_files: int = Field(default=20_000, gt=0, description="Reject snapshots with more files.")
+    max_total_mb: int = Field(
+        default=500, gt=0, description="Reject checkouts larger than this on disk."
+    )
+    max_indexed_file_kb: int = Field(
+        default=1024, gt=0, description="Larger files are kept for grep but not indexed."
+    )
+
+    @field_validator("data_dir")
+    @classmethod
+    def _relative_to_repo_root(cls, value: Path) -> Path:
+        return value if value.is_absolute() else REPO_ROOT / value
+
+
+class WorkerSettings(BaseModel):
+    poll_interval_s: float = Field(default=1.0, gt=0, description="Idle wait between job polls.")
+    lease_s: float = Field(
+        default=60.0, gt=0, description="A job whose lease expires is reclaimed by any worker."
+    )
+    max_attempts: int = Field(default=3, ge=1, description="Attempts before a job fails.")
+    retry_backoff_s: float = Field(default=5.0, ge=0, description="Base retry delay (doubles).")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
@@ -90,6 +140,9 @@ class Settings(BaseSettings):
     )
     database: DatabaseSettings
     qdrant: QdrantSettings = QdrantSettings()
+    github: GitHubSettings = GitHubSettings()
+    ingest: IngestSettings = IngestSettings()
+    worker: WorkerSettings = WorkerSettings()
 
     def public_config(self) -> dict[str, Any]:
         """Config safe to log or store with an eval run: secrets are masked."""
@@ -135,6 +188,13 @@ def render_env_example() -> str:
 def _format_default(value: object) -> str:
     if value is None or isinstance(value, SecretStr):
         return ""
+    if isinstance(value, Path):
+        # Never write this machine's absolute paths into the committed example.
+        return (
+            value.relative_to(REPO_ROOT).as_posix()
+            if value.is_relative_to(REPO_ROOT)
+            else str(value)
+        )
     if isinstance(value, StrEnum):
         return value.value
     if isinstance(value, list):

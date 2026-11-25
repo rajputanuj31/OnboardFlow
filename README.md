@@ -21,7 +21,8 @@ is X, what does this change break?* OnboardFlow v3 answers with citations to exa
 |---|---|
 | Scaffold: API, typed config, Postgres + Qdrant, CI | done |
 | Eval harness (5 suites' worth of data, judge, paired CIs) | done; v2 baseline run pending |
-| Ingestion, agent, retrieval, PR review, web app | planned |
+| Ingestion: whole repo per commit, background jobs, live progress | done |
+| Agent, retrieval, PR review, web app | planned |
 
 ## Run it locally
 Requirements: Docker, [uv](https://docs.astral.sh/uv/), make.
@@ -30,7 +31,9 @@ Requirements: Docker, [uv](https://docs.astral.sh/uv/), make.
 cp .env.example .env          # then set DATABASE__URL (see the comment in the file)
 make install                  # backend dependencies (locked)
 make up                       # Postgres + Qdrant, waits until healthy
+make migrate                  # create the database schema
 make dev                      # API on http://localhost:8000
+make worker                   # background worker (in another terminal)
 curl localhost:8000/health/ready
 ```
 

@@ -12,10 +12,11 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from onboardflow import __version__
-from onboardflow.routers import health
+from onboardflow.db.session import make_engine, make_sessionmaker
+from onboardflow.github import GitHubClient
+from onboardflow.routers import health, repos, snapshots
 from onboardflow.settings import Settings, get_settings
 
 
@@ -27,16 +28,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Shared, long-lived clients. Nothing connects until first use, so the app
         # starts even if Postgres or Qdrant are down; /health/ready reports that.
-        engine = create_async_engine(
-            settings.database.url.get_secret_value(),
-            pool_size=settings.database.pool_size,
-            pool_pre_ping=True,
-            connect_args={"timeout": settings.database.connect_timeout_s},
-        )
+        engine = make_engine(settings)
         http = httpx.AsyncClient(timeout=settings.qdrant.timeout_s)
         app.state.settings = settings
         app.state.db_engine = engine
+        app.state.sessions = make_sessionmaker(engine)
         app.state.http = http
+        app.state.github = GitHubClient(http, settings.github)
         try:
             yield
         finally:
@@ -52,4 +50,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(health.router)
+    app.include_router(repos.router)
+    app.include_router(snapshots.router)
     return app

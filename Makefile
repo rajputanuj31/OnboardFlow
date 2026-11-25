@@ -8,8 +8,8 @@ RUN      ?= baseline
 COMPOSE  := docker compose -f infra/docker-compose.yml
 
 .DEFAULT_GOAL := help
-.PHONY: help install up up-baseline down logs dev lint format typecheck test test-integration \
-        check env-example audit secrets-scan eval-prepare eval-estimate eval-run eval-judge \
+.PHONY: help install up up-baseline down logs dev worker migrate db-check lint format typecheck \
+        test test-integration check env-example audit secrets-scan eval-prepare eval-estimate eval-run eval-judge \
         eval-report eval-baseline eval-quick reproduce
 
 help: ## Show this help
@@ -34,6 +34,15 @@ logs: ## Tail service logs
 dev: ## Run the API with auto-reload on :8000
 	$(UV) run uvicorn onboardflow.main:create_app --factory --reload --port 8000
 
+worker: ## Run a background worker (ingest jobs)
+	$(UV) run python -m onboardflow.worker
+
+migrate: ## Apply database migrations
+	$(UV) run alembic upgrade head
+
+db-check: ## Fail if the models and the migrations have drifted apart
+	$(UV) run alembic check
+
 lint: ## Ruff lint + format check
 	$(UV) run ruff check .
 	$(UV) run ruff format --check .
@@ -54,8 +63,8 @@ test: ## Unit tests (no services, no network, no model calls)
 	$(UV) run pytest
 	$(UVE) run pytest
 
-test-integration: ## Integration tests (needs `make up`)
-	$(UV) run pytest -m integration
+test-integration: ## Integration + network tests (needs `make up` and internet)
+	$(UV) run pytest -m "integration or network"
 
 check: lint typecheck test ## Everything CI runs on the backend, except integration and security
 

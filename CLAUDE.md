@@ -6,14 +6,16 @@ plan before starting work. v2 is preserved at git tag `v2.0.0` and on `main`. Al
 
 ## Layout
 - `apps/api/` — FastAPI backend, Python 3.13, package `onboardflow` (src layout), managed with uv.
-- `apps/worker/` (step 3), `apps/web/` (step 8) — added later.
+- Background worker: `onboardflow.worker` in the same package (`make worker`); jobs live in
+  Postgres (`onboardflow/jobs.py`). `apps/web/` (step 8) — added later.
+- Migrations: Alembic in `apps/api/migrations` (`make migrate`; `make db-check` fails on drift).
 - `infra/` — docker compose for Postgres + Qdrant (server mode).
 - `evals/` — eval harness (package `onboardflow_evals`, own uv project): `data/` (committed JSONL
   datasets), `runs/` (committed results), `reports/` (generated), `.cache/` (gitignored: LLM-call
   cache, raw downloads, the v2 baseline install).
 
 ## Commands (run from repo root)
-- `make install` · `make up` / `make down` · `make dev`
+- `make install` · `make up` / `make down` · `make migrate` · `make dev` · `make worker`
 - `make lint` · `make typecheck` · `make test` · `make test-integration` (needs `make up`)
 - `make env-example` after any change to `settings.py`
 - `make audit` · `make secrets-scan`

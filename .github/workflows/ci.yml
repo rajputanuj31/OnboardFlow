@@ -46,7 +46,9 @@ jobs:
         run: uv --directory apps/api run mypy
       - name: Unit tests
         run: uv --directory apps/api run pytest
-      - name: Integration tests
+      - name: Migrations apply and match the models
+        run: make migrate db-check
+      - name: Integration + network tests
         run: make test-integration
 
   evals:

@@ -4,6 +4,7 @@ version = "3.0.0.dev0"
 description = "OnboardFlow v3 backend: repo ingestion, code-search agent, PR review, evals."
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.20.1",
     "asyncpg>=0.32.0",
     "fastapi>=0.165.0",
     "httpx>=0.28.1",
@@ -38,7 +39,7 @@ select = [
 ignore = []
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # assert is how pytest works
+"tests/**" = ["S101", "S106"]  # pytest asserts; fake credentials in fixtures
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -49,6 +50,10 @@ strict = true
 plugins = ["pydantic.mypy"]
 files = ["src", "tests"]
 
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*"]  # ships no type information
+ignore_missing_imports = true
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true
@@ -58,10 +63,11 @@ warn_required_dynamic_aliases = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = "-ra --strict-markers -m 'not integration'"
+addopts = "-ra --strict-markers -m 'not integration and not network'"
 filterwarnings = ["error"]
 markers = [
   "integration: needs the docker compose services (run with `make test-integration`)",
+  "network: needs internet access to GitHub (run with `make test-integration`)",
 ]
 
 [dependency-groups]
